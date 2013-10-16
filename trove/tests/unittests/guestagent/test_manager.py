@@ -13,6 +13,7 @@
 #    under the License.
 
 import os
+import os.path
 
 import testtools
 from mockito import verify, when, unstub, any, mock, never
@@ -22,8 +23,16 @@ from trove.guestagent import volume
 from trove.common.context import TroveContext
 from trove.guestagent.datastore.mysql.manager import Manager
 import trove.guestagent.datastore.mysql.service as dbaas
+from trove.common import utils
 from trove.guestagent import backup
 from trove.guestagent.volume import VolumeDevice
+
+from trove.guestagent.datastore.redis.manager import Manager as RedisManager
+from trove.guestagent.datastore.redis.manager import CONFIG_PATH, TMP_PATH
+from trove.guestagent.datastore.redis.manager import CONFIG_FILE
+from trove.guestagent.datastore.redis.manager import TMP_CONFIG_PATH
+from trove.guestagent.datastore.redis.manager import SERVICE_PATH
+from trove.guestagent.datastore.redis.manager import MOUNT_POINT
 
 
 class GuestAgentManagerTest(testtools.TestCase):
@@ -187,3 +196,167 @@ class GuestAgentManagerTest(testtools.TestCase):
         verify(dbaas.MySqlApp).secure_root(secure_remote_root=any())
         verify(dbaas.MySqlAdmin, times=times_report).report_root_enabled(
             self.context)
+
+
+class RedisGuestAgentManagerTest(testtools.TestCase):
+
+    def setUp(self):
+        super(RedisGuestAgentManagerTest, self).setUp()
+        self.manager = RedisManager()
+
+    def tearDown(self):
+        super(RedisGuestAgentManagerTest, self).tearDown()
+        unstub()
+
+    def test_prepare_without_dirs(self):
+        """
+        This test pretends both the CONFIG_PATH
+        and TMP_CONFIG_PATH do not exist and need to be
+        created. Also this test checks to ensure the config
+        files are never removed after directory creation as
+        the dirs are new and this action is not needed.
+        """
+        volume_mock = mock()
+        when(volume).VolumeDevice('/dev/fake').thenReturn(volume_mock)
+        when(utils).execute_with_timeout('chown',
+                                         'redis:redis',
+                                         MOUNT_POINT,
+                                         run_as_root=True).thenReturn('stdout',
+                                                                      'stderr')
+        when(os.path).isdir(CONFIG_PATH).thenReturn(False)
+        when(utils).execute_with_timeout('mkdir',
+                                         '-p',
+                                         CONFIG_PATH,
+                                         run_as_root=True).thenReturn('stdout',
+                                                                      'stderr')
+        when(os.path).isdir(TMP_PATH).thenReturn(False)
+        when(utils).execute_with_timeout('mkdir',
+                                         '-p',
+                                         TMP_PATH,
+                                         run_as_root=True).thenReturn('stdout',
+                                                                      'stderr')
+        when(utils).execute_with_timeout('mv',
+                                         TMP_CONFIG_PATH,
+                                         CONFIG_FILE,
+                                         run_as_root=True).thenReturn('stdout',
+                                                                      'stderr')
+        when(utils).execute_with_timeout(SERVICE_PATH,
+                                         'restart',
+                                         run_as_root=True).thenReturn('stdout',
+                                                                      'stderr')
+        self.manager.prepare('', '', '', '', '/dev/fake', '/dev/mount', '', '')
+        verify(volume_mock).format()
+        verify(volume_mock).mount('/dev/mount')
+        verify(os.path).isdir(CONFIG_PATH)
+        verify(utils).execute_with_timeout('chown',
+                                           'redis:redis',
+                                           MOUNT_POINT,
+                                           run_as_root=True)
+        verify(os.path).isdir(TMP_PATH)
+        verify(utils).execute_with_timeout('mkdir',
+                                           '-p',
+                                           CONFIG_PATH,
+                                           run_as_root=True)
+        verify(utils).execute_with_timeout('mkdir',
+                                           '-p',
+                                           TMP_PATH,
+                                           run_as_root=True)
+        verify(utils).execute_with_timeout('mv',
+                                           TMP_CONFIG_PATH,
+                                           CONFIG_FILE,
+                                           run_as_root=True)
+        verify(utils).execute_with_timeout(SERVICE_PATH,
+                                           'restart',
+                                           run_as_root=True)
+        verify(utils, never).execute_with_timeout('sudo',
+                                                  'rm',
+                                                  CONFIG_FILE,
+                                                  run_as_root=True)
+        verify(utils, never).execute_with_timeout('sudo',
+                                                  'rm',
+                                                  TMP_CONFIG_PATH,
+                                                  run_as_root=True)
+
+    def test_prepare_with_dirs(self):
+        """
+        This test pretends both the CONFIG_PATH
+        and TMP_CONFIG_PATH already exist and pretends
+        to create the redis config file without making
+        the associated directories.
+        """
+        volume_mock = mock()
+        when(volume).VolumeDevice('/dev/fake').thenReturn(volume_mock)
+        when(utils).execute_with_timeout('chown',
+                                         'redis:redis',
+                                         MOUNT_POINT,
+                                         run_as_root=True).thenReturn('stdout',
+                                                                      'stderr')
+        when(os.path).isdir(CONFIG_PATH).thenReturn(True)
+        when(utils).execute_with_timeout('rm',
+                                         CONFIG_FILE,
+                                         run_as_root=True).thenReturn('stdout',
+                                                                      'stderr')
+        when(os.path).isdir(TMP_PATH).thenReturn(True)
+        when(utils).execute_with_timeout('rm',
+                                         TMP_CONFIG_PATH,
+                                         run_as_root=True).thenReturn('stdout',
+                                                                      'stderr')
+        when(utils).execute_with_timeout('mv',
+                                         TMP_CONFIG_PATH,
+                                         CONFIG_FILE,
+                                         run_as_root=True).thenReturn('stdout',
+                                                                      'stderr')
+        when(utils).execute_with_timeout(SERVICE_PATH,
+                                         'restart',
+                                         run_as_root=True).thenReturn('stdout',
+                                                                      'stderr')
+        self.manager.prepare('', '', '', '', '/dev/fake', '/dev/mount', '', '')
+        verify(volume_mock).format()
+        verify(volume_mock).mount('/dev/mount')
+        verify(os.path).isdir(CONFIG_PATH)
+        verify(utils).execute_with_timeout('chown',
+                                           'redis:redis',
+                                           MOUNT_POINT,
+                                           run_as_root=True)
+        verify(os.path).isdir(TMP_PATH)
+        verify(utils).execute_with_timeout('rm',
+                                           CONFIG_FILE,
+                                           run_as_root=True)
+        verify(utils).execute_with_timeout('rm',
+                                           TMP_CONFIG_PATH,
+                                           run_as_root=True)
+        verify(utils).execute_with_timeout('mv',
+                                           TMP_CONFIG_PATH,
+                                           CONFIG_FILE,
+                                           run_as_root=True)
+        verify(utils).execute_with_timeout(SERVICE_PATH,
+                                           'restart',
+                                           run_as_root=True)
+        verify(utils, never).execute_with_timeout('mkdir',
+                                                  '-p',
+                                                  CONFIG_PATH,
+                                                  run_as_root=True)
+        verify(utils, never).execute_with_timeout('mkdir',
+                                                  '-p',
+                                                  TMP_PATH,
+                                                  run_as_root=True)
+
+    def test_restart(self):
+        when(utils).execute_with_timeout(SERVICE_PATH,
+                                         'restart',
+                                         run_as_root=True).thenReturn('stdout',
+                                                                      'stderr')
+        self.manager.restart("")
+        verify(utils).execute_with_timeout(SERVICE_PATH,
+                                           'restart',
+                                           run_as_root=True)
+
+    def test_stop_db(self):
+        when(utils).execute_with_timeout(SERVICE_PATH,
+                                         'stop',
+                                         run_as_root=True).thenReturn('stdout',
+                                                                      'stderr')
+        self.manager.stop_db("")
+        verify(utils).execute_with_timeout(SERVICE_PATH,
+                                           'stop',
+                                           run_as_root=True)
